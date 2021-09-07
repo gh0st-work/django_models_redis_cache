@@ -72,12 +72,18 @@ REDIS_ROOTS = {
 ### Run in the background
 
 You can just copy it to:
-    `app/management/commands/command_name.py`
+
+`app/management/commands/command_name.py`
+    
 And just run with:
-    `python manage.py command_name`
+
+`python manage.py command_name`
+    
 Help:
-    [Django custom management commands](https://docs.djangoproject.com/en/3.2/howto/custom-management-commands/)
-    [How to import something from settings](https://stackoverflow.com/a/14617309)
+
+[Django custom management commands](https://docs.djangoproject.com/en/3.2/howto/custom-management-commands/)
+    
+[How to import something from settings](https://stackoverflow.com/a/14617309)
 
 ```python
 
