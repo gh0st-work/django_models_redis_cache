@@ -4,7 +4,9 @@
 
 For one project, I needed to work with redis, but redis-py provides a minimum level of work with redis. I didn't find any Django-like ORM for redis, so I wrote library [python-redis-orm](https://github.com/gh0st-work/python_redis_orm/) ([PyPI](https://pypi.org/project/python-redis-orm/)).
 
-And this library is port to Django that **provides easy-to-use Django models caching via Redis**.
+Also, if you are searching for just django-like redis ORM, please check [django-redis-orm](https://github.com/gh0st-work/django_redis_orm/) ([PyPI](https://pypi.org/project/django-redis-orm/)).
+
+**And this library is port to Django that provides easy-to-use Django models caching via Redis**.
 
 ### Working with this library, you are expected:
 
