@@ -1,6 +1,6 @@
 # django-models-redis-cache
 
-## **Django Models Redis Cache, library that gives your specified django models regular caching via redis**
+## **Django Models Redis Cache (DMoReCa), library that gives your specified Django models regular caching via Redis**
 
 For one project, I needed to work with redis, but redis-py provides a minimum level of work with redis. I didn't find any Django-like ORM for redis, so I wrote library [python-redis-orm](https://github.com/gh0st-work/python_redis_orm/) ([PyPI](https://pypi.org/project/python-redis-orm/)).
 
@@ -90,7 +90,7 @@ Help:
 if redis_roots:
     if type(redis_roots) == dict:
         some_caching_redis_root = redis_roots['test_caching_root']
-        some_caching_redis_root.registered_django_models({
+        some_caching_redis_root.register_django_models({
             DjangoModelToCache1: {
                 'enabled': True,
                 'ttl': 60 * 5,  # Cache every 5 mins
@@ -116,7 +116,7 @@ if redis_roots:
     else:
         raise Exception('redis_roots must be dict')
 else:
-    raise Exception('No REDIS_ROOTS')
+    raise Exception('No redis_roots')
 
 ```
 

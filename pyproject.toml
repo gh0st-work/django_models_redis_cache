@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "django-models-redis-cache"
-version = "0.0.1"
-description = "Django Models Redis Cache, library that gives your specified django models regular caching via redis"
+version = "0.0.2"
+description = "Django Models Redis Cache (DMoReCa), library that gives your specified Django models regular caching via Redis"
 authors = ["Anton Nechaev <antonnechaev990@gmail.com>"]
 readme = "README.md"
 repository = "https://github.com/gh0st-work/django_redis_orm"

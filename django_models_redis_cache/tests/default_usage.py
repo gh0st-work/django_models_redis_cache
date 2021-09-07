@@ -42,7 +42,7 @@ REDIS_ROOTS = {
 if redis_roots:
     if type(redis_roots) == dict:
         some_caching_redis_root = redis_roots['test_caching_root']
-        some_caching_redis_root.registered_django_models({
+        some_caching_redis_root.register_django_models({
             DjangoModelToCache1: {
                 'enabled': True,
                 'ttl': 60 * 5,  # Cache every 5 mins
