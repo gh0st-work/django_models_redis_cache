@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 
 from asgiref.sync import sync_to_async
 from django.db import models as django_models
@@ -14,11 +15,11 @@ def default_cache_func(
         filter_by,
 ):
     redis_dicts = redis_root.get(redis_model, return_dict=True)
-    # cache_to_django(
-    #     django_model,
-    #     redis_dicts,
-    #     redis_root,
-    # )
+    cache_to_django(
+        django_model,
+        redis_dicts,
+        redis_root,
+    )
     django_to_cache(
         django_model,
         redis_model,
