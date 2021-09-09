@@ -39,7 +39,21 @@ def get_ids_from_untyped_data(instances):
         ]):
             ids = list(set(instances))
         else:
-            raise Exception('Not all elements are of the type int')
+            try:
+                if all([
+                    (type(instance_dict['id']) == int)
+                    for instance_dict in instances
+                ]):
+                    ids = [
+                        instance_dict['id']
+                        for instance_dict in instances
+                    ]
+                else:
+                    raise Exception('Not all elements are of the type int')
+            except:
+                raise Exception('Not all elements are of the type int')
+    elif type(instances) == int:
+        ids = [instances]
     else:
-        ids = instances
+        raise Exception(f"Can't get ids from {instances}")
     return ids

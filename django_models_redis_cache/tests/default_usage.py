@@ -22,7 +22,9 @@ REDIS_ROOTS = {
     'test_caching_root': RedisRoot(
         prefix='test_caching',
         connection_pool=get_connection_pool(),
+        async_db_requests_limit=100,
         ignore_deserialization_errors=True,
+        save_consistency=False,
         economy=True
     )
 }
@@ -39,27 +41,95 @@ REDIS_ROOTS = {
         https://stackoverflow.com/a/14617309
 """
 
+redis_roots = getattr(settings, "REDIS_ROOTS", None)
 if redis_roots:
     if type(redis_roots) == dict:
-        some_caching_redis_root = redis_roots['test_caching_root']
-        some_caching_redis_root.register_django_models({
-            DjangoModelToCache1: {
+        test_caching_root = redis_roots['test_caching_root']
+        test_caching_root.register_django_models({
+            CustomUser: {
                 'enabled': True,
-                'ttl': 60 * 5,  # Cache every 5 mins
-                'prefix': f'test_caching_root-DjangoModelToCache1-cache', # please make it unique
+                'ttl': 60 * 15,
+                'save_related_models': True,
+                'exclude_fields': [
+                    'is_admin',
+                    'api_key',
+                    'first_name',
+                    'last_name',
+                    'email',
+                    'is_staff',
+                    'date_joined',
+                    'password',
+                    'last_login',
+                    'user_permissions',
+                    'is_superuser',
+                    'groups',
+                ],
             },
-            # DjangoModelToCache2: {
-            #     'enabled': True,
-            #     'ttl': 60 * 10,  # Cache every 10 mins
-            #     'prefix': f'test_caching_root-DjangoModelToCache2-cache', # please make it unique
-            # },
-            # ...
+            BotSoft: {
+                'enabled': True,
+                'ttl': 60 * 15,
+                'save_related_models': True,
+                'exclude_fields': [
+                    'name',
+                    'image',
+                    'image_webp',
+                    'developer_url'
+                ],
+            },
+            Service: {
+                'enabled': True,
+                'ttl': 60 * 15,
+                'save_related_models': True,
+                'exclude_fields': [
+                    'name_append',
+                    'description',
+                    'min',
+                    'max',
+                ],
+            },
+            CustomService: {
+                'enabled': True,
+                'ttl': 60 * 15,
+                'save_related_models': True,
+                'exclude_fields': [
+                    'name_append',
+                ],
+            },
+            UniqueTask: {
+                'enabled': True,
+                'ttl': 60 * 5,
+                'save_related_models': True,
+            },
+            Task: {
+                'enabled': True,
+                'ttl': 60 * 5,
+                'save_related_models': False,
+                'filter_by': {
+                    'status': 'in_work',
+                }
+            },
+            Account: {
+                'enabled': True,
+                'ttl': 60 * 5,
+                'save_related_models': True,
+                'filter_by': {
+                    'last_task_completed_in__gte': datetime.datetime.now() - datetime.timedelta(days=14),
+                    'last_checked_in__gte': datetime.datetime.now() - datetime.timedelta(days=14),
+                }
+            },
+            BotSession: {
+                'enabled': True,
+                'ttl': 60 * 5,
+                'save_related_models': True,
+            },
+            TaskChallenge: {
+                'enabled': True,
+                'ttl': 60 * 1,
+                'save_related_models': True,
+            },
         })
-        # another_caching_redis_root = redis_roots['another_test_caching_root']
-        # some_caching_redis_root.registered_django_models({...})
         roots_to_cache = [
-            some_caching_redis_root,
-            # another_caching_redis_root
+            test_caching_root,
         ]
         print('STARTING CACHING')
         while True:

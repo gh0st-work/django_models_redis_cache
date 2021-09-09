@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import decimal
 import json
@@ -12,15 +13,12 @@ from time import sleep
 
 class RedisField:
 
-    def __init__(self, default=None, choices=None, null=True, ttl=None):
+    def __init__(self, default=None, choices=None, null=True):
         self.default = default
         self.value = None
         check_types(choices, dict)
         self.choices = choices
         self.null = null
-        if ttl is not None:
-            check_types(ttl, (int, float))
-        self.ttl = ttl
 
 
     def _get_default_value(self):
@@ -56,7 +54,7 @@ class RedisField:
         if value == 'null':
             if not self.null:
                 if redis_root.ignore_deserialization_errors:
-                    print(f'{value} can not be deserialized like {self.__class__.__name__}, ignoring')
+                    print(f'{datetime.datetime.now()} - {value} can not be deserialized like {self.__class__.__name__}, ignoring')
                 else:
                     raise Exception(f'{value} can not be deserialized like {self.__class__.__name__}')
 
@@ -91,10 +89,13 @@ class RedisNumber(RedisField):
     def deserialize_value(self, value, redis_root):
         self.deserialize_value_check_null(value, redis_root)
         if value != 'null':
-            if '.' in value:
-                value = float(value)
+            if type(value) == str:
+                if '.' in value:
+                    value = float(value)
+                else:
+                    value = int(value)
             else:
-                value = int(value)
+                check_types(value, (int, float))
         else:
             value = 0
         return value
@@ -128,10 +129,12 @@ class RedisDateTime(RedisString):
 
 class RedisForeignKey(RedisNumber):
 
-    def __init__(self, model=None, *args, **kwargs):
+    def __init__(self, model=None, save_related_models=False, *args, **kwargs):
         if not issubclass(model, RedisModel):
             raise Exception(f'{model.__name__} class is not RedisModel')
         self.model = model
+        check_types(save_related_models, bool)
+        self.save_related_models = save_related_models
         super().__init__(*args, **kwargs)
 
     def _get_id_from_instance_dict(self):
@@ -158,9 +161,9 @@ class RedisForeignKey(RedisNumber):
         instance = {
             'id': id
         }
-        for key in redis_root.redis_instance.scan_iter(f'{redis_root.prefix}:{model_name}:{id}:*'):
+        fast_get_results = redis_root.fast_get_keys_values(f'{redis_root.prefix}:{model_name}:{id}:*')
+        for key, raw_value in fast_get_results.items():
             prefix, model_name, instance_id, field_name = key.split(':')
-            raw_value = redis_root.redis_instance.get(key)
             value = redis_root.deserialize_value(raw_value, model_name, field_name)
             instance[field_name] = value
         return instance
@@ -170,7 +173,12 @@ class RedisForeignKey(RedisNumber):
         if value != 'null':
             value = super().deserialize_value(value, redis_root)
             check_types(value, int)
-            value = self._get_instance_by_id(value, redis_root)
+            if self.save_related_models:
+                value = self._get_instance_by_id(value, redis_root)
+            else:
+                value = {
+                    'django_id': value
+                }
         return value
 
 
@@ -231,10 +239,12 @@ class RedisList(RedisJson):
 
 class RedisManyToMany(RedisList):
 
-    def __init__(self, model=None, *args, **kwargs):
+    def __init__(self, model=None, save_related_models=False, *args, **kwargs):
         if not issubclass(model, RedisModel):
             raise Exception(f'{model.__name__} class is not RedisModel')
         self.model = model
+        check_types(save_related_models, bool)
+        self.save_related_models = save_related_models
         super().__init__(*args, **kwargs)
 
     def clean(self):
@@ -248,9 +258,9 @@ class RedisManyToMany(RedisList):
         instance = {
             'id': id
         }
-        for key in redis_root.redis_instance.scan_iter(f'{redis_root.prefix}:{model_name}:{id}:*'):
+        fast_get_results = redis_root.fast_get_keys_values(f'{redis_root.prefix}:{model_name}:{id}:*')
+        for key, raw_value in fast_get_results.items():
             prefix, model_name, instance_id, field_name = key.split(':')
-            raw_value = redis_root.redis_instance.get(key)
             value = redis_root.deserialize_value(raw_value, model_name, field_name)
             instance[field_name] = value
         return instance
@@ -260,10 +270,16 @@ class RedisManyToMany(RedisList):
         if value != 'null':
             value = super().deserialize_value(value, redis_root)
             check_types(value, list)
-            values_list = [
-                self._get_instance_by_id(redis_model_instance_dict, redis_root)
-                for redis_model_instance_dict in value
-            ]
+            if self.save_related_models:
+                values_list = [
+                    self._get_instance_by_id(redis_model_instance_dict, redis_root)
+                    for redis_model_instance_dict in value
+                ]
+            else:
+                values_list = [
+                    {'django_id': django_id}
+                    for django_id in value
+                ]
             value = values_list
         return value
 
@@ -284,8 +300,8 @@ class RedisBool(RedisNumber):
     def deserialize_value(self, value, redis_root):
         self.deserialize_value_check_null(value, redis_root)
         if value != 'null':
-            check_types(value, str)
-            value = int(value)
+            check_types(value, int)
+            value = bool(value)
         return value
 
 
@@ -294,14 +310,13 @@ class RedisDecimal(RedisNumber):
     def clean(self):
         self.value = self.check_value()
         if self.value not in [None, 'null']:
-            check_types(self.value, decimal.Decimal)
-            self.value = int(self.value)
+            check_types(self.value, (int, float, decimal.Decimal))
+            self.value = float(self.value)
         return super().clean()
 
     def deserialize_value(self, value, redis_root):
         self.deserialize_value_check_null(value, redis_root)
         if value != 'null':
-            check_types(value, str)
             value = decimal.Decimal(value)
         return value
 
@@ -392,18 +407,20 @@ class RedisRoot:
             self,
             connection_pool=None,
             prefix='redis_test',
+            async_db_requests_limit=50,
             ignore_deserialization_errors=True,
             save_consistency=False,
-            economy=False
+            economy=False,
     ):
         self.registered_models = []
         self.registered_django_models = {}
         if type(prefix) == str:
             self.prefix = prefix
         else:
-            print(f'Prefix {prefix} is type of {type(prefix)}, allowed only str, using default prefix "redis_test"')
+            print(f'{datetime.datetime.now()} - Prefix {prefix} is type of {type(prefix)}, allowed only str, using default prefix "redis_test"')
             self.prefix = 'redis_test'
         self.connection_pool = self._get_connection_pool(connection_pool)
+        self.async_db_requests_limit = async_db_requests_limit
         self.ignore_deserialization_errors = ignore_deserialization_errors
         self.save_consistency = save_consistency
         self.economy = economy
@@ -431,16 +448,27 @@ class RedisRoot:
                     'to_cache_in': now + datetime.timedelta(seconds=ttl),
                     'cache_conf': cache_conf
                 }
+        if django_models_to_cache:
+            print(f"{datetime.datetime.now()} - {', '.join(list(django_models_to_cache.keys()))} will be cached now...")
         return django_models_to_cache
 
     def check_cache(self):
         django_models_to_cache = self._get_django_models_to_cache()
+        exclude_fields = {
+            django_model: cache_conf['exclude_fields']
+            for django_model, cache_conf in django_models_to_cache.items()
+        }
+        filter_by = {
+            django_model: cache_conf['filter_by']
+            for django_model, cache_conf in django_models_to_cache.items()
+        }
         for django_model, cache_conf in django_models_to_cache.items():
             cache_func = cache_conf['cache_func']
+            save_related_models = cache_conf['save_related_models']
             
-            def get_or_create_redis_model_from_django_model(django_model, redis_root):
+            def get_or_create_redis_model_from_django_model(django_model, redis_root, save_related_models, exclude_fields):
                 registered_models_names = [model.__name__ for model in redis_root.registered_models]
-                redis_fields = django_fields_to_redis_fields(django_model, redis_root)
+                redis_fields = django_fields_to_redis_fields(django_model, redis_root, save_related_models, exclude_fields)
                 if django_model.__name__ in registered_models_names:
                     existing_redis_model_index = registered_models_names.index(django_model.__name__)
                     existing_redis_model = redis_root.registered_models[existing_redis_model_index]
@@ -449,17 +477,21 @@ class RedisRoot:
                     new_redis_model = create_redis_model_from_redis_fields(django_model, redis_fields, redis_root)
                 return new_redis_model
             
-            def django_fields_to_redis_fields(django_model, redis_root):
+            def django_fields_to_redis_fields(django_model, redis_root, save_related_models, exclude_fields):
                 redis_fields = {}
                 for django_field in django_model._meta.get_fields():
                     django_field_name = django_field.name
-                    if django_field_name in ['id', 'pk']:
-                        django_field_name = 'django_id'
-                        redis_field = RedisNumber(null=False)
-                    else:
-                        redis_field = django_field_to_redis_field(django_field, redis_root)
-                    if redis_field:
-                        redis_fields[django_field_name] = redis_field
+                    allowed = True
+                    if django_model in exclude_fields.keys():
+                        allowed = (django_field_name not in exclude_fields[django_model])
+                    if allowed:
+                        if django_field.name in ['id', 'pk']:
+                            django_field_name = 'django_id'
+                            redis_field = RedisNumber(null=False)
+                        else:
+                            redis_field = django_field_to_redis_field(django_field, redis_root, save_related_models, exclude_fields)
+                        if redis_field:
+                            redis_fields[django_field_name] = redis_field
                 return redis_fields
 
             def create_redis_model_from_redis_fields(django_model, redis_fields, redis_root):
@@ -467,7 +499,7 @@ class RedisRoot:
                 redis_root.register_models([new_redis_model])
                 return new_redis_model
 
-            def django_field_to_redis_field(django_field, redis_root):
+            def django_field_to_redis_field(django_field, redis_root, save_related_models, exclude_fields):
 
                 field_mapping = {
                     django_models.BooleanField: RedisBool,
@@ -506,11 +538,11 @@ class RedisRoot:
                         {}
                     )
 
-                    redis_field_params = django_field_params_to_redis_field_params(django_field, redis_root)
+                    redis_field_params = django_field_params_to_redis_field_params(django_field, redis_root, save_related_models, exclude_fields)
                     redis_field = redis_field_class(**redis_field_params)
                 return redis_field
 
-            def django_field_params_to_redis_field_params(django_field, redis_root):
+            def django_field_params_to_redis_field_params(django_field, redis_root, save_related_models, exclude_fields):
                 allowed_params = ['null', 'default', 'choices', 'remote_field']
                 allowed_redis_params = {}
                 for django_field_param_name in django_field.__dict__.keys():
@@ -533,9 +565,10 @@ class RedisRoot:
                             if value is not None:
                                 value = value.model
                                 if value is not None:
-                                    value = get_or_create_redis_model_from_django_model(value, redis_root)
+                                    value = get_or_create_redis_model_from_django_model(value, redis_root, save_related_models, exclude_fields)
                                     if value is not None:
                                         allowed_redis_params[redis_field_param_name] = value
+                                        allowed_redis_params['save_related_models'] = save_related_models
                         else:
                             allowed_redis_params[redis_field_param_name] = value
                 return allowed_redis_params
@@ -551,19 +584,31 @@ class RedisRoot:
                 redis_root.registered_models = new_registered_models
                 return new_redis_model
 
+            redis_model = get_or_create_redis_model_from_django_model(django_model, self, save_related_models, exclude_fields)
+
             cache_func(
                 django_model,
                 self,
-                get_or_create_redis_model_from_django_model
+                redis_model,
+                save_related_models,
+                get_or_create_redis_model_from_django_model,
+                exclude_fields,
+                filter_by,
             )
-            print(f'Cached {django_model}')
+            print(f'{datetime.datetime.now()} - Cached {django_model} successfully')
+
+    def fast_get_keys_values(self, string):
+        keys = list(self.redis_instance.scan_iter(string))
+        values = self.redis_instance.mget(keys)
+        results = dict(zip(keys, values))
+        return results
 
     def _get_connection_pool(self, connection_pool):
         if isinstance(connection_pool, redis.ConnectionPool):
             connection_pool.connection_kwargs['decode_responses'] = True
             self.connection_pool = connection_pool
         else:
-            print(f'{self.__class__.__name__}: No connection_pool provided, trying default config...')
+            print(f'{datetime.datetime.now()} - {self.__class__.__name__}: No connection_pool provided, trying default config...')
             default_host = 'localhost'
             default_port = 6379
             default_db = 0
@@ -594,8 +639,10 @@ class RedisRoot:
         cache_conf = {
             'enabled': False,
             'ttl': 60 * 5,
+            'save_related_models': True,
             'cache_func': default_cache_func,
-            'prefix': f'{self.prefix}-{name}-cache',
+            'exclude_fields': [],
+            'filter_by': {},
         }
         if user_cache_conf is not None:
             if type(user_cache_conf) == dict:
@@ -609,23 +656,39 @@ class RedisRoot:
                         cache_conf['ttl'] = user_cache_conf['ttl']
                     else:
                         raise Exception(f'{name} -> cache config -> ttl must be int')
-                if 'django_model' in user_cache_conf.keys():
-                    if issubclass(user_cache_conf['django_model'], django_models.Model):
-                        cache_conf['django_model'] = user_cache_conf['django_model']
+                if 'save_related_models' in user_cache_conf.keys():
+                    if type(user_cache_conf['save_related_models']) == bool:
+                        cache_conf['save_related_models'] = user_cache_conf['save_related_models']
                     else:
-                        raise Exception(
-                            f'{name} -> cache config -> django_model must be subclass of django.db.models Model')
+                        raise Exception(f'{name} -> cache config -> save_related_models must be int')
                 if 'cache_func' in user_cache_conf.keys():
                     if type(user_cache_conf['cache_func']) == Callable:
                         cache_conf['cache_func'] = user_cache_conf['cache_func']
                     else:
                         raise Exception(
                             f'{name} -> cache config -> cache_func must be callable function')
-                if 'prefix' in user_cache_conf.keys():
-                    if type(user_cache_conf['prefix']) == str:
-                        cache_conf['prefix'] = user_cache_conf['prefix']
+                if 'exclude_fields' in user_cache_conf.keys():
+                    if type(user_cache_conf['exclude_fields']) == list:
+                        if all([
+                            (type(field) == str)
+                            for field in user_cache_conf['exclude_fields']
+                        ]):
+                            cache_conf['exclude_fields'] = user_cache_conf['exclude_fields']
+                        else:
+                            raise Exception(f'{name} -> cache config -> exclude_fields -> all fields must be strings')
                     else:
-                        raise Exception(f'{name} -> cache config -> prefix must be str')
+                        raise Exception(f'{name} -> cache config -> exclude_fields must be list')
+                if 'filter_by' in user_cache_conf.keys():
+                    if type(user_cache_conf['filter_by']) == dict:
+                        if all([
+                            (type(field_name) == str)
+                            for field_name in user_cache_conf['filter_by'].keys()
+                        ]):
+                            cache_conf['filter_by'] = user_cache_conf['filter_by']
+                        else:
+                            raise Exception(f'{name} -> cache config -> filter_by -> all keys must be strings')
+                    else:
+                        raise Exception(f'{name} -> cache config -> filter_by must be dict')
             else:
                 raise Exception(f'{name} -> cache config must be dict')
 
@@ -653,7 +716,7 @@ class RedisRoot:
                 break
         if not found:
             if self.ignore_deserialization_errors:
-                print(f'{model_name} not found in registered models, ignoring')
+                print(f'{datetime.datetime.now()} - {model_name} not found in registered models, ignoring')
                 model = model_name
             else:
                 raise Exception(f'{model_name} not found in registered models')
@@ -668,7 +731,7 @@ class RedisRoot:
                 field_instance = getattr(model, field_name)
         except BaseException as ex:
             if self.ignore_deserialization_errors:
-                print(f'{model.__name__} has no field {field_name}, ignoring deserialization')
+                print(f'{datetime.datetime.now()} - {model.__name__} has no field {field_name}, ignoring deserialization')
                 field_instance = field_name
             else:
                 raise Exception(f'{model.__name__} has no field {field_name}')
@@ -680,7 +743,7 @@ class RedisRoot:
             pass
         except BaseException as ex:
             if self.ignore_deserialization_errors:
-                print(f'{raw_value} can not be deserialized like {field_instance.__class__.__name__}, ignoring')
+                print(f'{datetime.datetime.now()} - {raw_value} can not be deserialized like {field_instance.__class__.__name__}, ignoring')
                 value = raw_value
             else:
                 raise Exception(f'{raw_value} can not be deserialized like {field_instance.__class__.__name__}')
@@ -794,18 +857,20 @@ class RedisRoot:
     def _get_all_stored_model_instances(self, model, filters=None):
         model_name = model.__name__
         instances_with_allowed = {}
-        for key in self.redis_instance.scan_iter(f'{self.prefix}:{model_name}:*'):
-            prefix, model_name, instance_id, field_name = key.split(':')
+        fast_get_results = self.fast_get_keys_values(f'{self.prefix}:{model_name}:*')
+        for instance_key, fields_json in fast_get_results.items():
+            prefix, model_name, instance_id = instance_key.split(':')
             instance_id = int(instance_id)
-            raw_value = self.redis_instance.get(key)
-            value = self.deserialize_value(raw_value, model_name, field_name)
-            allowed = self._filter_field_name(field_name, value, filters)
-            if instance_id not in instances_with_allowed.keys():
-                instances_with_allowed[instance_id] = {}
-            instances_with_allowed[instance_id][field_name] = {
-                'value': value,
-                'allowed': allowed
-            }
+            fields_dict = json.loads(fields_json)
+            for field_name, raw_value in fields_dict.items():
+                value = self.deserialize_value(raw_value, model_name, field_name)
+                allowed = self._filter_field_name(field_name, value, filters)
+                if instance_id not in instances_with_allowed.keys():
+                    instances_with_allowed[instance_id] = {}
+                instances_with_allowed[instance_id][field_name] = {
+                    'value': value,
+                    'allowed': allowed
+                }
         return instances_with_allowed
 
     def _get_instances_from_instances_with_allowed(self, instances_with_allowed):
@@ -855,21 +920,34 @@ class RedisRoot:
 
     def _update_by_key(self, key, fields_to_update, renew_ttl, new_ttl):
         updated_data = None
-        prefix, model_name, instance_id, field_name = key.split(':')
+        prefix, model_name, instance_id = key.split(':')
+        saved_model = self._get_registered_model_by_name(model_name)
         instance_id = int(instance_id)
-        if field_name in fields_to_update.keys():
-            saved_model = self._get_registered_model_by_name(model_name)
-            if issubclass(saved_model, RedisModel):
-                saved_field_instance = self._get_field_instance_by_name(field_name, saved_model)
-                if issubclass(saved_field_instance.__class__, RedisField):
-                    saved_field_instance.value = fields_to_update[field_name]
-                    cleaned_value = saved_field_instance.clean()
-                    field_ttl = self._get_ttl_by_update_params(saved_field_instance, saved_model, renew_ttl, new_ttl)
-                    self.redis_instance.set(key, cleaned_value, ex=field_ttl)
-                    updated_data = {
-                        'model': saved_model,
-                        'id': instance_id
-                    }
+        instance_data_json = self.redis_instance.get(key)
+        instance_data = json.loads(instance_data_json)
+        data_to_write = {}
+        for field_name, field_data in instance_data.items():
+            saved_field_instance = self._get_field_instance_by_name(field_name, saved_model)
+            if field_name in fields_to_update.keys():
+                saved_field_instance.value = fields_to_update[field_name]
+                cleaned_value = saved_field_instance.clean()
+            else:
+                cleaned_value = field_data
+            if key not in data_to_write.keys():
+                data_to_write[key] = {}
+            data_to_write[key][field_name] = cleaned_value
+        for instance_key, fields_to_write in data_to_write.items():
+            ttl = None
+            if renew_ttl:
+                ttl = saved_model.get_model_ttl()
+            elif new_ttl:
+                ttl = new_ttl
+            fields_to_write_json = json.dumps(fields_to_write)
+            self.redis_instance.set(instance_key, fields_to_write_json, ex=ttl)
+            updated_data = {
+                'model': saved_model,
+                'id': instance_id
+            }
         return updated_data
 
     def update(self, model, instances=None, return_dict=False, renew_ttl=False, new_ttl=None, **fields_to_update):
@@ -881,9 +959,9 @@ class RedisRoot:
                 if updated_data is not None:
                     updated_datas.append(updated_data)
         else:
-            ids_to_delete = get_ids_from_untyped_data(instances)
-            for instance_id in ids_to_delete:
-                for key in self.redis_instance.scan_iter(f'{self.prefix}:{model_name}:{instance_id}:*'):
+            ids_to_update = get_ids_from_untyped_data(instances)
+            for instance_id in ids_to_update:
+                for key in self.redis_instance.scan_iter(f'{self.prefix}:{model_name}:{instance_id}'):
                     updated_data = self._update_by_key(key, fields_to_update, renew_ttl, new_ttl)
                     if updated_data is not None:
                         updated_datas.append(updated_data)
@@ -910,8 +988,29 @@ class RedisRoot:
         else:
             ids_to_delete = get_ids_from_untyped_data(instances)
             for instance_id in ids_to_delete:
-                for key in self.redis_instance.scan_iter(f'{self.prefix}:{model_name}:{instance_id}:*'):
+                for key in self.redis_instance.scan_iter(f'{self.prefix}:{model_name}:{instance_id}'):
                     self._delete_by_key(key)
+
+    # def get_id_from_django_id(self, model, django_id):
+    #     model_name = model.__name__
+    #     check_types(django_id, int)
+    #     result = False
+    #     for key in self.redis_instance.scan_iter(f'{self.prefix}:{model_name}:*:django_id'):
+    #         prefix, model_name, instance_id, field_name = key.split(':')
+    #         value = int(self.redis_instance.get(key))
+    #         if value == django_id:
+    #             result = instance_id
+    #     return result
+    #
+    # def is_instance_edited_by_id(self, model, instance_id):
+    #     model_name = model.__name__
+    #     check_types(instance_id, int)
+    #     result = False
+    #     for key in self.redis_instance.scan_iter(f'{self.prefix}:{model_name}:{instance_id}:edited'):
+    #         prefix, model_name, instance_id, field_name = key.split(':')
+    #         value = bool(int(self.redis_instance.get(key)))
+    #         result = value
+    #     return result
 
 
 class RedisModel:
@@ -951,6 +1050,7 @@ class RedisModel:
                     self.__model_data__['meta'][field_name] = cleaned_value
 
     def _get_initial_model_field(self, field_name):
+        name = self.__model_data__['name']
         if field_name in self.__class__.__dict__.keys():
             return deepcopy(self.__class__.__dict__[field_name])
         else:
@@ -978,43 +1078,40 @@ class RedisModel:
             else:
                 raise Exception(f'{self.__class__.__name__} has no field {name}')
 
-    def get_field_ttl(self, field):
-        field_ttl = field.ttl
-        if field_ttl is None:
-            meta = self.__model_data__['meta']
-            if 'ttl' in meta.keys():
-                field_ttl = meta['ttl']
-        return field_ttl
-
-    def _serialize_data(self, full=True):
+    def _serialize_data(self):
         redis_root = self.__model_data__['redis_root']
         name = self.__model_data__['name']
         fields = self.__model_data__['fields']
         fields = dict(fields)
-        model_key = f'{redis_root.prefix}:{name}:{self.id.value}'
+        instance_key = f'{redis_root.prefix}:{name}:{self.id.value}'
         cleaned_fields = {}
         for field_name, field in fields.items():
             if not field_name.startswith('__'):
                 try:
                     cleaned_value = field.clean()
-                    if full:
-                        field_ttl = self.get_field_ttl(field)
-                        cleaned_fields[model_key + f':{field_name}'] = {
-                            'value': cleaned_value,
-                            'ttl': field_ttl
-                        }
-                    else:
-                        cleaned_fields[field_name] = cleaned_value
+                    if instance_key not in cleaned_fields.keys():
+                        cleaned_fields[instance_key] = {}
+                    cleaned_fields[instance_key][field_name] = cleaned_value
                 except BaseException as ex:
                     raise Exception(f'{ex} ({name} -> {field_name})')
         fields_with_model_key = cleaned_fields
         return fields_with_model_key
+    
+    def get_model_ttl(self):
+        ttl = None
+        meta = self.__model_data__['meta']
+        if 'ttl' in meta.keys():
+            ttl = meta['ttl']
+        return ttl
 
     def _set_fields(self):
-        field_to_write = self._serialize_data()
-        redis_instance = self.__model_data__['redis_root'].redis_instance
-        for key, field_data in field_to_write.items():
-            redis_instance.set(key, field_data['value'], ex=field_data['ttl'])
+        data_to_write = self._serialize_data()
+        model_ttl = self.get_model_ttl()
+        redis_root = self.__model_data__['redis_root']
+        for instance_key, fields_dict in data_to_write.items():
+            redis_instance = redis_root.redis_instance
+            fields_json = json.dumps(fields_dict)
+            redis_instance.set(instance_key, fields_json, ex=model_ttl)
 
     def _get_new_id(self):
         redis_root = self.__model_data__['redis_root']
