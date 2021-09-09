@@ -449,7 +449,7 @@ class RedisRoot:
                     'cache_conf': cache_conf
                 }
         if django_models_to_cache:
-            print(f"{datetime.datetime.now()} - {', '.join(list(django_models_to_cache.keys()))} will be cached now...")
+            print(f"{datetime.datetime.now()} - {', '.join([str(model) for model in django_models_to_cache.keys()])} will be cached now...")
         return django_models_to_cache
 
     def check_cache(self):

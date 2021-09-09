@@ -15,11 +15,11 @@ def default_cache_func(
         filter_by,
 ):
     redis_dicts = redis_root.get(redis_model, return_dict=True)
-    cache_to_django(
-        django_model,
-        redis_dicts,
-        redis_root,
-    )
+    # cache_to_django(
+    #     django_model,
+    #     redis_dicts,
+    #     redis_root,
+    # )
     django_to_cache(
         django_model,
         redis_model,
