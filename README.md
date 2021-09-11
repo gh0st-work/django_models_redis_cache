@@ -17,25 +17,16 @@ Also, if you are searching for just django-like redis ORM, please check [django-
 - Connection pooling
 - Easy adaptation to your needs
 - Adequate informational messages and error messages
-- Built-in RedisRoot class that stores specified models, with:
-    - **prefix** setting - prefix of this RedisRoot to be stored in redis
-    - **connection_pool** setting - your redis.ConnectionPool instance (from redis-py)
-    - **async_db_requests_limit** setting - your database connections limit
-    - **ignore_deserialization_errors** setting - do not raise errors, while deserializing data
-    - **save_consistency** setting - show structure-first data
-    - **economy** setting - to not return full data and save some requests (usually, speeds up your app on 80%)
-- Customizing caching settings by model:
-    - **enabled** setting - to cache or not
-    - **ttl** setting - cache period
-    - **save_related_models** setting - save ForeignKey-s and ManyToMany-s instances
-    - **exclude_fields** setting - field names to be excluded from caching
-    - **filter_by** - setting - only models that passed filter params will be cached
-- CRUD (Create Read Update Delete), in our variation: save, get, filter, order, update, delete:
-    - `example_instance = ExampleModel(example_field='example_data').save()` - to create an instance and get its data dict
-    - `filtered_example_instances = redis_root.get(ExampleModel, example_field='example_data')` - to get all ExampleModel instances with example_field filter and get its data dict
-    - `ordered_instances = redis_root.order(filtered_example_instances, '-id')` - to get ordered filtered_example_instances by id ('-' for reverse)
-    - `updated_example_instances = redis_root.update(ExampleModel, ordered_instances, example_field='another_example_data')` - to update all ordered_instances example_field with value 'another_example_data' and get its data dict
-    - `redis_root.delete(ExampleModel, updated_example_instances)` - to delete updated_example_instances
+- Built-in RedisRoot class that stores specified models, with (optional):
+    - Async database limit
+    - Ignoring deserialization errors
+    - Use structure-first data
+- Customizing caching settings by model (optional):
+    - Cache every X seconds
+    - Save related models
+    - Fields to exclude from caching
+    - Filter objects to cache
+- CRUD (Create Read Update Delete), that uses your django models
 
 # Installation
 `pip install django-models-redis-cache`
@@ -52,18 +43,21 @@ Add "django_models_redis_cache" to your INSTALLED_APPS setting like this::
 # Usage
 
 1. Create **RedisRoot** with params:
-    - **prefix** - (str) prefix for your redis root
-    - **connection_pool** - (redis.ConnectionPool) redis-py redis.ConnectionPool instance, with decode_responses=True
-    - **async_db_requests_limit** - (int) your database has max connections limit, please enter it here
-    - **ignore_deserialization_errors** - (bool) to ignore deserialization errors or raise exception
-    - **economy** - (bool) if True, all create/update requests will return only instance id 
+    - **prefix** (str) - prefix for your redis root
+    - **connection_pool** (redis.ConnectionPool) - redis-py redis.ConnectionPool instance, with decode_responses=True
+    - **async_db_requests_limit** (int) - your database has max connections limit, please enter it here
+    - **ignore_deserialization_errors** (bool) - to ignore deserialization errors or raise exception
+    - **economy** (bool) - if True, all update requests will return only instance id 
 2. Call **register_django_models({...})** on your RedisRoot instance and provide dict, where keys are django models and values are dicts (django_model:dict) with config params (str:value):
-    - **enabled** - (bool) - to cache or not
-    - **ttl** - (int) - to cache every x seconds
-    - **save_related_models** - (bool) - to save ForeignKey-s and ManyToMany-s instances or not
-    - **exclude_fields** - (list of strings) - fields to exclude from caching
-    - **filter_by** - (dict str:value) - filter objects to cache by something
+    - **enabled** (bool) - to cache or not
+    - **ttl** (int) - to cache every x seconds
+    - **save_related_models** (bool) - to save ForeignKey-s and ManyToMany-s instances or not
+    - **exclude_fields** (list of strings) - fields to exclude from caching
+    - **filter_by** (dict str:value) - filter objects to cache by something
+    - **delete** (bool) - foolproof
+    - **write_to_django** (bool) - if you need to write data to django, also uses as foolproof
 3. Call **check_cache()** on your RedisRoot instance
+4. Use our CRUD, or just get your cached data
 
 # Example usage
 
@@ -128,6 +122,8 @@ if redis_roots:
                 'enabled': True,
                 'ttl': 60 * 15,
                 'save_related_models': True,
+                'delete': True,
+                'write_to_django': True,
                 'exclude_fields': [
                     'is_admin',
                     'api_key',
@@ -147,6 +143,8 @@ if redis_roots:
                 'enabled': True,
                 'ttl': 60 * 15,
                 'save_related_models': True,
+                'delete': True,
+                'write_to_django': True,
                 'exclude_fields': [
                     'name',
                     'image',
@@ -158,6 +156,8 @@ if redis_roots:
                 'enabled': True,
                 'ttl': 60 * 15,
                 'save_related_models': True,
+                'delete': True,
+                'write_to_django': True,
                 'exclude_fields': [
                     'name_append',
                     'description',
@@ -169,6 +169,8 @@ if redis_roots:
                 'enabled': True,
                 'ttl': 60 * 15,
                 'save_related_models': True,
+                'delete': True,
+                'write_to_django': True,
                 'exclude_fields': [
                     'name_append',
                 ],
@@ -177,11 +179,15 @@ if redis_roots:
                 'enabled': True,
                 'ttl': 60 * 5,
                 'save_related_models': True,
+                'delete': True,
+                'write_to_django': True,
             },
             Task: {
                 'enabled': True,
                 'ttl': 60 * 5,
-                'save_related_models': False,
+                'save_related_models': True,
+                'delete': True,
+                'write_to_django': True,
                 'filter_by': {
                     'status': 'in_work',
                 }
@@ -190,6 +196,8 @@ if redis_roots:
                 'enabled': True,
                 'ttl': 60 * 5,
                 'save_related_models': True,
+                'delete': True,
+                'write_to_django': True,
                 'filter_by': {
                     'last_task_completed_in__gte': datetime.datetime.now() - datetime.timedelta(days=14),
                     'last_checked_in__gte': datetime.datetime.now() - datetime.timedelta(days=14),
@@ -199,11 +207,15 @@ if redis_roots:
                 'enabled': True,
                 'ttl': 60 * 5,
                 'save_related_models': True,
+                'delete': True,
+                'write_to_django': True,
             },
             TaskChallenge: {
                 'enabled': True,
                 'ttl': 60 * 1,
                 'save_related_models': True,
+                'delete': True,
+                'write_to_django': True,
             },
         })
         roots_to_cache = [
@@ -220,3 +232,113 @@ else:
 
 ```
 
+
+### Use in views
+
+If you enabled write_to_django and delete, you can fully use redis caching and does not care about writing to the database with 
+
+**our CRUD**:
+
+```python
+
+    # Django part
+    gh0st_user = CustomUser.objects.get(username='gh0st')
+    another_user = CustomUser.objects.get(username='another_username')
+    random_service = random.choice(list(Service.objects.all()))
+    placement = random_service.placement
+    if ServiceCustomPrice.objects.filter(user=gh0st_user, service=random_service, active=True):
+        placement = ServiceCustomPrice.objects.get(user=gh0st_user, service=random_service, active=True).price
+    if gh0st_user.sale:
+        placement = placement * gh0st_user.sale
+    task_count = 9999
+    task_price = task_count * placement
+    new_task_1_params = {
+        'owner': gh0st_user,
+        'service': random_service,
+        'url': 'https://github.com/gh0st-work/',
+        'count': task_count,
+        'price': task_price,
+        'status': 'checking',
+    }
+    new_task_1 = Task.objects.create(**new_task_1_params)
+    new_task_2_params = {
+        'owner': another_user,
+        'service': random_service,
+        'url': 'https://github.com/gh0st-work/',
+        'count': task_count,
+        'price': task_price,
+        'status': 'checking',
+    }
+    new_task_2 = Task.objects.create(**new_task_2_params)
+    
+    
+    
+    # Cache part
+    # Preparations
+    test_caching_root.check_cache()  # Just for testing, if it not runned in the background and not caching right now
+    
+    # Get
+    cached_task_1 = test_caching_root.get(Task, django_id=new_task_1.id)  # filter by django_id, if you leave blank will return all instances
+    print('\n\n\n')
+    cached_task_2 = test_caching_root.get(Task, django_id=new_task_2.id)  # filter by django_id, if you leave blank will return all instances
+    success = False
+    try:
+        cached_task_1 = cached_task_1[0]
+        cached_task_2 = cached_task_2[0]
+        if cached_task_1['owner']['django_id'] == new_task_1.owner.id:
+            if cached_task_1['price'] == new_task_1.price:
+                if cached_task_2['owner']['django_id'] == new_task_2.owner.id:
+                    if cached_task_2['price'] == new_task_2.price:
+                        success = True
+    except:
+        pass
+    print(f'Get test: {success = }')  # If create works, will print: "Get test: success = True"
+
+    # Create and deep filtering
+    new_task_params = new_task_1_params
+    new_task_params['owner'] = test_caching_root.get(CustomUser, username='gh0st')
+    new_task_params['service'] = test_caching_root.get(Service, django_id=random_service.id)
+    created_task = test_caching_root.create(Task, **new_task_params)
+    cached_gh0st_tasks = test_caching_root.get(Task, owner__username='gh0st')
+    all_tasks_owner_is_gh0st = all([
+        (task['owner']['username'] == 'gh0st')
+        for task in cached_gh0st_tasks
+    ])
+    task_created = (created_task in cached_gh0st_tasks)
+    success = (all_tasks_owner_is_gh0st and task_created)
+    print(f'Create and deep filtering test: {success = }')  # If works, will print: "Create and deep filtering test: success = True"
+
+    # Update
+    random_price_first_part = Decimal(random.randrange(0, 10000))
+    random_price_second_part = Decimal(random.randrange(0, 1000))
+    random_price = random_price_first_part + random_price_second_part / Decimal(1000)
+    test_caching_root.update(
+        Task, cached_task_2,
+        price=random_price,
+        status='completed',
+    )
+    cached_task_2 = test_caching_root.get(
+        Task,
+        price=random_price,  # filter by price, if you leave blank will return all instances
+        status__in=['checking', 'completed'],  # if status in the list
+    )
+    success = False
+    try:
+        cached_task_2 = cached_task_2[0]
+        price_is_same = (cached_task_2['price'] == random_price)
+        django_id_is_same = (cached_task_2['django_id'] == new_task_2.id)
+        status_is_completed = (cached_task_2['status'] == 'completed')
+        if price_is_same and django_id_is_same and status_is_completed:
+            success = True
+    except:
+        pass
+    print(f'Update test: {success = }')  # If works, will print: "Update test: success = True"
+
+    # Delete
+    test_caching_root.delete(Task, cached_task_2)
+    old_cached_task_2 = test_caching_root.get(Task, price=random_price)
+    success = (not len(old_cached_task_2))
+    print(f'Delete test: {success = }')  # If works, will print: "Delete test: success = True"
+
+
+```
